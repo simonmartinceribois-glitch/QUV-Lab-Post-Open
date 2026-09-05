@@ -572,6 +572,336 @@ export function runReportFidelityTests(): {
     );
   }
 
+  // =========================================================================
+  // RF-18 : Aucun COLOR COMPUTED admissible → jamais ΔE = 0 (ou 0.00)
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.acquisitions = {};
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+
+    const colorText = report.sections.colorResults;
+    const noZeroDeltaE = !colorText.includes('0.00') && !colorText.includes('ΔE* enregistrée : 0');
+    const hasExplicitNonRenseigne = colorText.includes('Non renseigné') || colorText.includes('aucune donnée COLOR COMPUTED');
+
+    record(
+      'RF-18',
+      'Aucun COLOR COMPUTED admissible : jamais ΔE = 0 ni 0.00 par défaut',
+      noZeroDeltaE && hasExplicitNonRenseigne,
+      'Pas de "0.00", mention explicite de donnée non renseignée ou indisponible',
+      `Texte: ${colorText}`
+    );
+  }
+
+  // =========================================================================
+  // RF-19 : Aucun GLOSS retention → jamais 100 % par défaut dans le CSV
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const stageT0 = trial.stages[0];
+    const panelE1 = trial.batches[0].panels[1];
+    trial.acquisitions[`${stageT0.id}__${panelE1.id}__GLOSS`] = {
+      id: 'acq-gloss-t0',
+      trialId: trial.id,
+      stageId: stageT0.id,
+      panelId: panelE1.id,
+      batchId: trial.batches[0].id,
+      familyId: 'GLOSS',
+      status: 'MEASURED',
+      raw: {} as any,
+      computed: {
+        meanGloss: 45.2,
+        stdDevGloss: 1.1,
+        retentionRatePercent: null
+      } as any,
+      trace: { createdAt: '2026-09-01T00:00:00Z', source: 'MANUAL_KEYPAD' } as any
+    } as any;
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const csv = exportReportToCsv(trial, report, ruleSet);
+
+    const glossCsvLine = csv
+      .split('\n')
+      .find((l) => l.includes(';GLOSS;') && l.includes(`"${panelE1.label}"`)) || '';
+
+    const retField = glossCsvLine.split(';')[8]?.replace(/"/g, '') || '';
+    const no100Percent = retField !== '100 %' && retField !== '100%';
+
+    record(
+      'RF-19',
+      'Aucun GLOSS retention : jamais 100 % par défaut dans le CSV',
+      no100Percent,
+      'retStr !== "100 %" lorsque retentionRatePercent est absent',
+      `retField: "${retField}", ligne: ${glossCsvLine}`
+    );
+  }
+
+  // =========================================================================
+  // RF-20 : OBSERVATION sans summary → jamais "Aspect conforme"
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const stageT0 = trial.stages[0];
+    const panelE1 = trial.batches[0].panels[1];
+    trial.acquisitions[`${stageT0.id}__${panelE1.id}__OBSERVATIONS`] = {
+      id: 'acq-obs-t0',
+      trialId: trial.id,
+      stageId: stageT0.id,
+      panelId: panelE1.id,
+      batchId: trial.batches[0].id,
+      familyId: 'OBSERVATIONS',
+      status: 'MEASURED',
+      raw: {} as any,
+      computed: {
+        summary: undefined
+      } as any,
+      trace: { createdAt: '2026-09-01T00:00:00Z', source: 'MANUAL_KEYPAD' } as any
+    } as any;
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const csv = exportReportToCsv(trial, report, ruleSet);
+
+    const obsCsvLine = csv
+      .split('\n')
+      .find((l) => l.includes(';OBSERVATIONS;') && l.includes(`"${panelE1.label}"`)) || '';
+
+    const noAspectConforme = !obsCsvLine.includes('Aspect conforme');
+    const containsNonRenseigne = obsCsvLine.includes('Non renseigné');
+
+    record(
+      'RF-20',
+      'OBSERVATION sans summary : jamais "Aspect conforme" par défaut dans le CSV',
+      noAspectConforme && containsNonRenseigne,
+      'Absence de "Aspect conforme" et présence de "Non renseigné"',
+      `Ligne CSV: ${obsCsvLine}`
+    );
+  }
+
+  // =========================================================================
+  // RF-21 : Aucune observation → jamais "Aucun défaut majeur"
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.acquisitions = {};
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+
+    const obsSection = report.sections.visualObservations;
+    const noAucunDefaut = !obsSection.includes('Aucun défaut') && !obsSection.includes('arrêt anticipé');
+    const indicatesNonRenseigne = obsSection.includes('Non renseigné');
+
+    record(
+      'RF-21',
+      'Aucune observation : jamais "Aucun défaut majeur" ni conclusion favorable fabriquée',
+      noAucunDefaut && indicatesNonRenseigne,
+      'Pas de "Aucun défaut", mention "Non renseigné"',
+      `Section visualObservations: ${obsSection}`
+    );
+  }
+
+  // =========================================================================
+  // RF-22 : Aucun T0 validé → jamais "T0 validé pour l'ensemble des grandeurs"
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.stages[0].status = 'NOT_STARTED';
+    trial.acquisitions = {};
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const synthesis = report.sections.scientificSynthesis;
+
+    const noUniversalT0Claim =
+      !synthesis.includes('ont été validées pour l\'ensemble des grandeurs') &&
+      !synthesis.includes('T0 ont été validées');
+    const indicatesNotValidated = synthesis.includes('n\'est pas validée') || synthesis.includes('NOT_STARTED');
+
+    record(
+      'RF-22',
+      'Aucun T0 validé : jamais d\'affirmation que les T0 sont validés pour l\'ensemble des grandeurs',
+      noUniversalT0Claim && indicatesNotValidated,
+      'Pas de fausse affirmation de validation T0, mention explicite du statut non validé',
+      `Synthèse: ${synthesis}`
+    );
+  }
+
+  // =========================================================================
+  // RF-23 : Aucune étape évaluée → jamais "168 h à 0 h" ni résultat cinétique fictif
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.stages.forEach((s) => (s.status = 'NOT_STARTED'));
+    trial.acquisitions = {};
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const kinetics = report.sections.kineticsAnalysis;
+
+    const no168to0h = !kinetics.includes('168 h à 0 h');
+    const indicatesNonRenseigne = kinetics.includes('Dernière étape effectivement évaluée : Non renseigné');
+
+    record(
+      'RF-23',
+      'Aucune étape évaluée : jamais "168 h à 0 h" ni résultat cinétique fictif',
+      no168to0h && indicatesNonRenseigne,
+      'Pas de "168 h à 0 h", étape évaluée indiquée "Non renseigné"',
+      `Analyse cinétique: ${kinetics}`
+    );
+  }
+
+  // =========================================================================
+  // RF-24 : Aucune donnée RAW → jamais "Intégrité : 100 %" sans contrôle réel
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.acquisitions = {};
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const annexA = report.annexes.annexA_RawDataSummary;
+
+    const no100Percent = !annexA.includes('100%') && !annexA.includes('100 %');
+    const indicatesNoData = annexA.includes('Total acquisitions : 0') || annexA.includes('aucune donnée brute');
+
+    record(
+      'RF-24',
+      'Aucune acquisition brute : jamais d\'affirmation "Intégrité : 100%"',
+      no100Percent && indicatesNoData,
+      'Pas de "100%", indication claire de l\'absence de données brutes',
+      `Annexe A: ${annexA}`
+    );
+  }
+
+  // =========================================================================
+  // RF-25 : Aucune acquisition → aucune affirmation statique sur le recensement des alertes
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.acquisitions = {};
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const annexC = report.annexes.annexC_QualityAssessmentSummary;
+    const qcSection = report.sections.qualityControl;
+
+    const noStaticClaim = !annexC.includes('Tous les avertissements et anomalies sont répertoriés sans masquage');
+    const indicatesNotAvailable =
+      annexC.includes('Non disponible — aucune acquisition enregistrée') &&
+      qcSection.includes('Non disponible — aucune acquisition enregistrée');
+
+    record(
+      'RF-25',
+      'Aucune acquisition : pas d\'affirmation que les alertes sont recensées sans masquage',
+      noStaticClaim && indicatesNotAvailable,
+      'Pas d\'affirmation statique, mention explicite "Non disponible — aucune acquisition"',
+      `Annexe C: ${annexC} | Section QC: ${qcSection}`
+    );
+  }
+
+  // =========================================================================
+  // RF-26 : Rapport incomplet → aucune conclusion scientifique favorable fabriquée
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.acquisitions = {};
+    trial.stages.forEach((s) => (s.status = 'NOT_STARTED'));
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+    const synthesis = report.sections.scientificSynthesis;
+    const factualConclusion = report.sections.factualConclusion;
+
+    const noFavorableFabrication =
+      !synthesis.includes('validées pour l\'ensemble') &&
+      !report.sections.visualObservations.includes('Aucun défaut') &&
+      !report.sections.colorResults.includes('0.00') &&
+      !factualConclusion.includes('conforme');
+
+    const synthesisMentionsNoData = synthesis.includes('Aucune cinétique de vieillissement ne peut être caractérisée');
+
+    record(
+      'RF-26',
+      'Rapport incomplet : aucune conclusion scientifique favorable fabriquée en l\'absence de données',
+      noFavorableFabrication && synthesisMentionsNoData,
+      'Pas de conclusions favorables inventées, synthèse réservée',
+      `Synthèse: ${synthesis}`
+    );
+  }
+
+  // =========================================================================
+  // RF-27 : Présence d'une vraie valeur numérique 0 → 0 doit rester 0
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const stageT0 = trial.stages[0];
+    const panelE1 = trial.batches[0].panels[1];
+
+    trial.acquisitions[`${stageT0.id}__${panelE1.id}__COLOR`] = {
+      id: 'acq-color-zero',
+      trialId: trial.id,
+      stageId: stageT0.id,
+      panelId: panelE1.id,
+      batchId: trial.batches[0].id,
+      familyId: 'COLOR',
+      status: 'MEASURED',
+      raw: { readings: [{ pointIndex: 1, L: 50, a: 0, b: 0 }] } as any,
+      computed: {
+        meanL: 50,
+        meanA: 0,
+        meanB: 0,
+        deltaE: 0
+      } as any,
+      trace: { createdAt: '2026-09-01T00:00:00Z', source: 'MANUAL_KEYPAD' } as any
+    } as any;
+
+    const report = buildScientificReport(trial, ruleSet, { operatorId: 'OP' });
+
+    const colorSection = report.sections.colorResults;
+    const hasRealZero = colorSection.includes('Variation maximale ΔE* enregistrée : 0.00');
+    const displayZeroIsPreserved = displayValue(0) === '0';
+
+    record(
+      'RF-27',
+      'Vraie valeur numérique 0 : scrupuleusement préservée et restituée (ΔE=0, displayValue(0)="0")',
+      hasRealZero && displayZeroIsPreserved,
+      'ΔE réel 0.00 affiché et displayValue(0) === "0"',
+      `Section Color: ${colorSection}, displayValue(0): "${displayValue(0)}"`
+    );
+  }
+
+  // =========================================================================
+  // RF-28 : Test d'intégration global adversarial — aucune fabrication dans le rapport et le CSV
+  // =========================================================================
+  {
+    const trialMinimal = createBaseTrial();
+    trialMinimal.acquisitions = {};
+    trialMinimal.stages[0].status = 'IN_PROGRESS';
+    const stage2016 = trialMinimal.stages.find((s) => s.cycleIndex === 12);
+    if (stage2016) stage2016.status = 'NOT_STARTED';
+
+    const report = buildScientificReport(trialMinimal, ruleSet, { operatorId: 'OP' });
+    const csv = exportReportToCsv(trialMinimal, report, ruleSet);
+
+    const allReportText = Object.values(report.sections).join('\n') + '\n' + Object.values(report.annexes).join('\n');
+
+    const noFabricatedDeltaE = !report.sections.colorResults.includes('0.00');
+    const noFabricatedGlossRetention = !report.sections.glossResults.includes('100.0 %') && !csv.includes(';100 %;');
+    const noFabricatedAspectConforme = !csv.includes('Aspect conforme') && !allReportText.includes('Aspect conforme');
+    const noFabricatedAucunDefaut = !allReportText.includes('Aucun défaut');
+    const noFabricatedT0Valide = !allReportText.includes('T0 ont été validées') && !allReportText.includes('T0 est validée');
+    const noFabricatedIntegrite100 = !allReportText.includes('Intégrité : 100%');
+
+    const globalAdversarialValid =
+      noFabricatedDeltaE &&
+      noFabricatedGlossRetention &&
+      noFabricatedAspectConforme &&
+      noFabricatedAucunDefaut &&
+      noFabricatedT0Valide &&
+      noFabricatedIntegrite100;
+
+    record(
+      'RF-28',
+      'Test d\'intégration global adversarial : aucune fabrication dans le rapport et le CSV sur trial minimal',
+      globalAdversarialValid,
+      'Pas de ΔE=0.00, 100%, Aspect conforme, Aucun défaut, T0 validé, Intégrité 100%',
+      `DeltaE OK: ${noFabricatedDeltaE}, Gloss OK: ${noFabricatedGlossRetention}, Obs OK: ${noFabricatedAspectConforme}, Defaut OK: ${noFabricatedAucunDefaut}, T0 OK: ${noFabricatedT0Valide}, Integ OK: ${noFabricatedIntegrite100}`
+    );
+  }
+
   const passed = results.filter((r) => r.passed).length;
   return {
     results,

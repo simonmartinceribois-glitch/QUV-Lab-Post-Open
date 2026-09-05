@@ -280,32 +280,36 @@ export function buildScientificReport(
   const activeExposedPanelIds = new Set(activeExposedPanels.map((p) => p.id));
 
   // Synthèse des calculs sans JAMAIS recalculer localement
-  let maxDeltaE = 0;
-  let maxDeltaEPanel = '';
-  let minRetention = 100;
-  let minRetentionPanel = '';
+  let maxDeltaE: number | null = null;
+  let maxDeltaEPanel: string | null = null;
+  let minRetention: number | null = null;
+  let minRetentionPanel: string | null = null;
 
-  Object.entries(trial.acquisitions).forEach(([key, acq]) => {
+  for (const acq of Object.values(trial.acquisitions)) {
     // Exclusion formelle du Témoin T et des éprouvettes non actives ou non exposées
     if (!activeExposedPanelIds.has(acq.panelId)) {
-      return;
+      continue;
     }
 
     if (acq.familyId === 'COLOR' && acq.computed) {
       const dE = (acq.computed as ColorComputedData).deltaE;
-      if (typeof dE === 'number' && dE > maxDeltaE) {
-        maxDeltaE = dE;
-        maxDeltaEPanel = acq.panelId;
+      if (typeof dE === 'number') {
+        if (maxDeltaE === null || dE > maxDeltaE) {
+          maxDeltaE = dE;
+          maxDeltaEPanel = acq.panelId;
+        }
       }
     }
     if (acq.familyId === 'GLOSS' && acq.computed) {
       const ret = (acq.computed as GlossComputedData).retentionRatePercent;
-      if (typeof ret === 'number' && ret < minRetention) {
-        minRetention = ret;
-        minRetentionPanel = acq.panelId;
+      if (typeof ret === 'number') {
+        if (minRetention === null || ret < minRetention) {
+          minRetention = ret;
+          minRetentionPanel = acq.panelId;
+        }
       }
     }
-  });
+  }
 
   const metadata: ScientificReportMetadata = {
     reportId,
@@ -340,6 +344,73 @@ export function buildScientificReport(
   } else {
     dimensionsLine = `Dimensions des éprouvettes :\n  Longueur : ${lengthDisplay}\n  Largeur : ${widthDisplay}\n  Épaisseur : ${thicknessDisplay}`;
   }
+
+  const hasRecordedVisualObservations = Object.values(trial.acquisitions).some(
+    (a) => a.familyId === 'OBSERVATIONS' && ((a.raw !== null && a.raw !== undefined) || (a.computed !== null && a.computed !== undefined))
+  );
+
+  const evaluatedExposureStages = evaluatedStages.filter((s) => (s.scheduledExposureHours || 0) > 0);
+  const lastEvaluatedStage = evaluatedStages.length > 0 ? evaluatedStages[evaluatedStages.length - 1] : null;
+  const lastEvaluatedHours =
+    lastEvaluatedStage?.scheduledExposureHours !== undefined && lastEvaluatedStage?.scheduledExposureHours !== null
+      ? `${lastEvaluatedStage.scheduledExposureHours} h`
+      : 'Non renseigné';
+
+  let kineticsAnalysisText = '';
+  if (evaluatedExposureStages.length > 0) {
+    const maxHours = evaluatedExposureStages[evaluatedExposureStages.length - 1].scheduledExposureHours;
+    kineticsAnalysisText = `Analyse cinétique de la dégradation : Les données compilées permettent d'observer les courbes d'évolution temporelle depuis T0 (0 h) jusqu'aux étapes en cours d'exposition (168 h à ${maxHours} h) et l'étape finale à 2016 h.\nDernière étape effectivement évaluée : ${maxHours} h.\nDistinction rigoureuse : La dispersion intra-panneau (répétabilité de la mesure) est isolée de la dispersion inter-panneaux (homogénéité du lot).`;
+  } else if (evaluatedStages.some((s) => s.cycleIndex === 0 || s.stageType === 'INITIAL_PRE_EXPOSURE')) {
+    kineticsAnalysisText = `Analyse cinétique de la dégradation : Seule l'étape initiale T0 (0 h) est renseignée. Aucune étape d'exposition intermédiaire ou finale n'a encore été évaluée.\nDernière étape effectivement évaluée : T0 (0 h).\nDistinction rigoureuse : La dispersion intra-panneau (répétabilité de la mesure) est isolée de la dispersion inter-panneaux (homogénéité du lot).`;
+  } else {
+    kineticsAnalysisText = `Analyse cinétique de la dégradation : Aucune étape d'exposition n'a été évaluée pour cet essai.\nDernière étape effectivement évaluée : Non renseigné.\nDistinction rigoureuse : La dispersion intra-panneau (répétabilité de la mesure) est isolée de la dispersion inter-panneaux (homogénéité du lot).`;
+  }
+
+  const totalAcquisitionsCount = Object.keys(trial.acquisitions).length;
+  const rawAcquisitionsCount = Object.values(trial.acquisitions).filter(
+    (a) => a.raw !== null && a.raw !== undefined
+  ).length;
+
+  let blockingAlertsCount = 0;
+  let warningAlertsCount = 0;
+  Object.values(trial.acquisitions).forEach((acq) => {
+    if (Array.isArray(acq.alerts)) {
+      acq.alerts.forEach((al) => {
+        if (al.severity === 'BLOCKING') blockingAlertsCount++;
+        if (al.severity === 'WARNING') warningAlertsCount++;
+      });
+    }
+  });
+
+  const qualityAlertsSummary =
+    totalAcquisitionsCount === 0
+      ? `Bilan des anomalies : Non disponible — aucune acquisition enregistrée.`
+      : alertsCount > 0
+        ? `Bilan des anomalies : Alerte : ${alertsCount} anomalie(s) recensée(s).`
+        : `Bilan des anomalies : Aucune alerte enregistrée sur les acquisitions analysées.`;
+
+  const familiesWithData = ['COLOR', 'GLOSS', 'PERSOZ', 'ADHESION', 'OBSERVATIONS'].filter((fam) =>
+    Object.values(trial.acquisitions).some(
+      (a) => a.familyId === fam && ((a.computed !== null && a.computed !== undefined) || (a.raw !== null && a.raw !== undefined))
+    )
+  );
+
+  const isT0Validated = !!stageT0 && stageT0.status === 'VALIDATED';
+  const t0SynthesisStatement = isT0Validated
+    ? `L'étape de référence initiale T0 est validée.`
+    : `L'étape de référence initiale T0 n'est pas validée (statut : ${displayValue(stageT0?.status)}).`;
+
+  const dataPresenceStatement =
+    familiesWithData.length > 0
+      ? `Grandeurs physiques avec données enregistrées : ${familiesWithData.join(', ')}.`
+      : `Aucune donnée expérimentale n'a encore été enregistrée pour les grandeurs physiques actives.`;
+
+  const behaviorStatement =
+    familiesWithData.length > 0
+      ? `Le comportement au vieillissement est suivi selon les cinétiques des grandeurs actives mesurées.`
+      : `Aucune cinétique de vieillissement ne peut être caractérisée en l'absence de mesures.`;
+
+  const scientificSynthesisText = `Synthèse générale :\nL'essai ${trial.metadata.reference} regroupe ${trial.batches.length} lot(s) expérimental(aux).\n${t0SynthesisStatement}\n${dataPresenceStatement}\n${behaviorStatement}\nL'ensemble des résultats est conservé avec distinction stricte entre données brutes et résultats calculés.`;
 
   const sections = {
     identification: `Essai référence : ${trial.metadata.reference}\nTitre de l'étude : ${displayValue(trial.metadata.title)}\nClient / Projet : ${displayValue(trial.metadata.projectOrClient)}\nOpérateur de génération : ${displayValue(options.operatorId)}\nDate d'émission : ${new Date(now).toLocaleString('fr-FR')}\nStatut de l'essai : ${trial.status} (Configuration : ${trial.configurationStatus})`,
@@ -383,14 +454,25 @@ export function buildScientificReport(
         )
         .join('\n'),
     measurementPlan: `Familles de mesure actives : ${trial.config.activeFamilies.join(', ')}\n• Couleur : ${trial.config.familyConfigs.COLOR?.enabled ? 'Active (4 points normatifs par éprouvette)' : 'Désactivée'}\n• Brillance : ${trial.config.familyConfigs.GLOSS?.enabled ? 'Active (2 points sens du fil + 2 points perpendiculaire)' : 'Désactivée'}\n• Persoz : ${trial.config.familyConfigs.PERSOZ?.enabled ? 'Active (3 mesures d\'amortissement - Labo)' : 'Désactivée'}\n• Adhérence au quadrillage : ${trial.config.familyConfigs.ADHESION?.enabled ? 'Active (NF EN ISO 2409:2020 - 6×6 incisions)' : 'Désactivée'}\n• Observations visuelles : ${trial.config.familyConfigs.OBSERVATIONS?.enabled ? 'Active (Évaluation ISO 4628)' : 'Désactivée'}`,
-    colorResults: `Les coordonnées trichromatiques CIE L*a*b* et les variations différentielles ΔL*, Δa*, Δb*, ΔE*ab sont issues exclusivement du moteur scientifique QUV-Lab (version ${ruleSet.version}).\nÉtape initiale T0 : Référence absolue pour chaque éprouvette.\nProgression observée : Variation maximale ΔE* enregistrée : ${maxDeltaE.toFixed(2)} sur les éprouvettes évaluées.\nConsulter l'Annexe B pour le détail des valeurs par éprouvette et par lot.`,
-    glossResults: `Mesures de réflectance spéculaire sous géométrie 60°.\nÉtape initiale T0 : Niveau de brillance initial caractérisé par éprouvette.\nÉvolution temporelle : Rétention résiduelle minimale de ${minRetention.toFixed(1)} % constatée sur la campagne.\nConsulter l'Annexe B pour les calculs de variation absolue ΔGloss et de taux de rétention résiduelle.`,
+    colorResults: `Les coordonnées trichromatiques CIE L*a*b* et les variations différentielles ΔL*, Δa*, Δb*, ΔE*ab sont issues exclusivement du moteur scientifique QUV-Lab (version ${ruleSet.version}).\nÉtape initiale T0 : Référence absolue pour chaque éprouvette.\nProgression observée : ${
+      typeof maxDeltaE === 'number'
+        ? `Variation maximale ΔE* enregistrée : ${maxDeltaE.toFixed(2)} sur les éprouvettes évaluées.`
+        : `Variation maximale ΔE* enregistrée : Non renseigné (aucune donnée COLOR COMPUTED admissible).`
+    }\nConsulter l'Annexe B pour le détail des valeurs par éprouvette et par lot.`,
+    glossResults: `Mesures de réflectance spéculaire sous géométrie 60°.\nÉtape initiale T0 : Niveau de brillance initial caractérisé par éprouvette.\nÉvolution temporelle : ${
+      typeof minRetention === 'number'
+        ? `Rétention résiduelle minimale de ${minRetention.toFixed(1)} % constatée sur la campagne.`
+        : `Taux de rétention résiduelle : Non renseigné (aucune donnée GLOSS COMPUTED admissible).`
+    }\nConsulter l'Annexe B pour les calculs de variation absolue ΔGloss et de taux de rétention résiduelle.`,
     persozResults: `Dureté superficielle par temps d'amortissement du pendule Persoz (secondes).\nNOTE MÉTHODOLOGIQUE : Cette grandeur constitue une recommandation interne du laboratoire (LAB_RECOMMENDATION) et ne constitue pas une exigence normative formelle de la NF EN 927-6.\nÉvolution : Suivi de la cinétique de réticulation / dégradation mécanique superficielle.`,
     adhesionResults: `Évaluation de la résistance à la séparation par quadrillage selon NF EN ISO 2409:2020.\nNOTE MÉTHODOLOGIQUE : L'essai au quadrillage constitue une méthode d'évaluation qualitative de la résistance du revêtement au détachement selon une grille de 6×6 incisions (classes 0 à 5), et ne doit en aucun cas être assimilé à une force d'adhérence quantitative en MPa.\nProtocole : Éprouvette témoin T à T0 (référence initiale), éprouvettes exposées à C12 (2016 h). Espacement de peigne 2 mm (≤ 120 µm) ou 3 mm (121–250 µm) selon l'épaisseur sèche du revêtement.`,
-    visualObservations: `Cotations des défauts surfaciques selon les normes ISO 4628 (Cloquage, Écaillage, Craquelage, Farinage) et ISO 2409 (Quadrillage).\nAucun défaut majeur prématuré n'a entraîné d'arrêt anticipé de l'essai.`,
-    kineticsAnalysis: `Analyse cinétique de la dégradation : Les données compilées permettent d'observer les courbes d'évolution temporelle depuis T0 (0 h) jusqu'aux étapes en cours d'exposition (168 h à ${evaluatedStages[evaluatedStages.length - 1]?.scheduledExposureHours || 0} h) et l'étape finale à 2016 h.\nDistinction rigoureuse : La dispersion intra-panneau (répétabilité de la mesure) est isolée de la dispersion inter-panneaux (homogénéité du lot).`,
-    qualityControl: `Contrôle qualité des acquisitions : Chaque mesure est qualifiée selon 4 niveaux (GOOD, ACCEPTABLE, WARNING, INVALID).\nToutes les données brutes (RAW) sont préservées dans leur intégralité sans modification ni arrondissement destructif.\n` +
-      `Bilan des anomalies : ${alertsCount > 0 ? `Alerte : ${alertsCount} anomalie(s) recensée(s)` : 'Aucune alerte enregistrée'}.`,
+    visualObservations: `Cotations des défauts surfaciques selon les normes ISO 4628 (Cloquage, Écaillage, Craquelage, Farinage) et ISO 2409 (Quadrillage).\n${
+      hasRecordedVisualObservations
+        ? `Les observations visuelles enregistrées sont présentées dans les résultats correspondants.`
+        : `Observations visuelles : Non renseigné.`
+    }`,
+    kineticsAnalysis: kineticsAnalysisText,
+    qualityControl: `Contrôle qualité des acquisitions : Chaque mesure est qualifiée selon 4 niveaux (GOOD, ACCEPTABLE, WARNING, INVALID).\nToutes les données brutes (RAW) sont préservées dans leur intégralité sans modification ni arrondissement destructif.\n${qualityAlertsSummary}`,
     deviationsAndAdaptations: adaptedFamilies.length > 0
       ? `Adaptations de protocole enregistrées pour cet essai :\n` +
         adaptedFamilies
@@ -404,25 +486,40 @@ export function buildScientificReport(
         `\nNOTE IMPORTANTE : Une adaptation justifiée (ADAPTED_JUSTIFIED) ne constitue pas une conformité standard automatique à la NF EN 927-6.`
       : `Aucune adaptation de protocole. L'ensemble des acquisitions a suivi les paramètres standards par défaut du référentiel NF EN 927-6.`,
     calculationTraceability: `Traçabilité intégrale du moteur de calcul :\n• Moteur scientifique : QUV-Lab Scientific Engine ${ruleSet.version}\n• RuleSet ID : ${ruleSet.id} (Référence : ${ruleSet.standardReference})\n• Méthode d'écart-type : Échantillon n-1 (${ruleSet.statisticalRules.stdDevMethod})\n• Formule colorimétrique : ${ruleSet.colorimetry.differenceFormula} (${ruleSet.colorimetry.illuminant}/${ruleSet.colorimetry.observer})\n• Géométrie de brillance par défaut : ${ruleSet.statisticalRules.glossGeometryDefault}°\n• Date d'exécution du calcul : ${now}`,
-    scientificSynthesis: `Synthèse générale :\nL'essai ${trial.metadata.reference} regroupe ${trial.batches.length} lots expérimentaux sur support bois massif. Les mesures de référence initiales T0 ont été validées pour l'ensemble des grandeurs physiques actives. Le comportement au vieillissement est caractérisé par le couplage des cinétiques colorimétriques (ΔE*ab), de perte de réflectance (rétention de brillance) et de résistance mécanique (Persoz).\nL'ensemble des résultats est conservé avec distinction stricte entre données brutes et résultats calculés.`,
+    scientificSynthesis: scientificSynthesisText,
     factualConclusion: `Les résultats obtenus montrent l'évolution des propriétés mesurées au cours de l'exposition.\n\nLes éventuelles variations observées sont présentées par famille de mesure et comparées aux valeurs initiales T0.\n\nLes relevés présentant des alertes ou des adaptations de protocole sont identifiés dans les tableaux de résultats.\n\nLa présente synthèse ne constitue pas à elle seule une conclusion de conformité à la NF EN 927-6.`
   };
 
+  const rawIntegrityStatement =
+    totalAcquisitionsCount > 0
+      ? `Intégrité RAW : vérification détaillée disponible dans les données d'acquisition et le journal d'audit (${rawAcquisitionsCount} relevé(s) brut(s) conservé(s) dans leur précision native d'acquisition sans altération).`
+      : `Intégrité RAW : Non applicable — aucune donnée brute enregistrée.`;
+
+  const qualityAssessmentStatement =
+    totalAcquisitionsCount === 0
+      ? `Alertes : Non disponible — aucune acquisition enregistrée.`
+      : `Recensement des alertes : ${blockingAlertsCount} alerte(s) bloquante(s), ${warningAlertsCount} avertissement(s) répertoriés sans masquage sur l'ensemble des acquisitions.`;
+
   const annexes = {
-    annexA_RawDataSummary: `ANNEXE A — DONNÉES DE MESURE BRUTES (RAW DATA)\nTotal acquisitions : ${Object.keys(trial.acquisitions).length} relevés enregistrés.\nIntégrité : 100% des points bruts conservés dans leur précision native d'acquisition sans altération.`,
+    annexA_RawDataSummary: `ANNEXE A — DONNÉES DE MESURE BRUTES (RAW DATA)\nTotal acquisitions : ${totalAcquisitionsCount} relevé(s) enregistré(s).\n${rawIntegrityStatement}`,
     annexB_ComputedResultsSummary: `ANNEXE B — RÉSULTATS CALCULÉS (COMPUTED DATA)\nMoyennes arithmétiques, écarts-types d'échantillon, variations différentielles (ΔE*ab, ΔGloss, rétention %, ΔDureté) calculés par le moteur scientifique v${ruleSet.version}.`,
-    annexC_QualityAssessmentSummary: `ANNEXE C — CONTRÔLE QUALITÉ DES MESURES\nSynthèse de qualification métrologique (VALID / SUSPECT / INVALID / MISSING).\nTous les avertissements et anomalies sont répertoriés sans masquage.`,
+    annexC_QualityAssessmentSummary: `ANNEXE C — CONTRÔLE QUALITÉ DES MESURES\nSynthèse de qualification métrologique (VALID / SUSPECT / INVALID / MISSING).\n${qualityAssessmentStatement}`,
     annexD_ProtocolAdaptationsSummary: `ANNEXE D — ADAPTATIONS DE PROTOCOLE & DÉROGATIONS\nRegistre des modifications de paramétrage, motifs techniques et signatures opérateurs.`,
     annexE_AuditTrailSummary: `ANNEXE E — JOURNAL D'AUDIT SCIENTIFIQUE (AUDIT TRAIL)\nHistorique chronologique immuable des ${trial.auditTrail.length} événements enregistrés pour cet essai.`,
     annexF_ScientificVersionSummary: `ANNEXE F — RÉFÉRENTIEL SCIENTIFIQUE & VERSIONS\nRuleSet : ${ruleSet.id} | Standard : ${ruleSet.standardReference} | Schéma : ${REPORT_SCHEMA_VERSION} | Moteur : ${ruleSet.version}`
   };
+
+  const chronologicalSummary =
+    evaluatedStages.length > 0
+      ? `l'analyse chronologique jusqu'à ${lastEvaluatedHours}`
+      : `aucune étape d'exposition évaluée`;
 
   return {
     id: reportId,
     metadata,
     status: 'GENERATED' as ScientificReportStatus,
     title: `Rapport Scientifique d'Essai — ${trial.metadata.reference}`,
-    executiveSummary: `Rapport d'essai de vieillissement accéléré NF EN 927-6 émis le ${new Date(now).toLocaleDateString('fr-FR')} pour l'essai ${trial.metadata.reference}. Comprend la synthèse des ${trial.batches.length} lots et l'analyse chronologique de T0 à ${evaluatedStages[evaluatedStages.length - 1]?.scheduledExposureHours || 0} h.`,
+    executiveSummary: `Rapport d'essai de vieillissement accéléré NF EN 927-6 émis le ${new Date(now).toLocaleDateString('fr-FR')} pour l'essai ${trial.metadata.reference}. Comprend la synthèse des ${trial.batches.length} lot(s) et ${chronologicalSummary}.`,
     normativeReference: ruleSet.standardReference || 'NF EN 927-6',
     protocolStatus,
     isComplete: audit.isComplete,
@@ -503,7 +600,7 @@ export function exportReportToCsv(trial: Trial, report: ScientificReport, ruleSe
               valStr = compGloss.meanGloss !== null && compGloss.meanGloss !== undefined ? `${compGloss.meanGloss.toFixed(1)} GU` : '—';
               stdStr = compGloss.stdDevGloss !== null && compGloss.stdDevGloss !== undefined ? `${compGloss.stdDevGloss.toFixed(2)}` : '—';
               deltaStr = compGloss.deltaGloss !== null && compGloss.deltaGloss !== undefined ? `${compGloss.deltaGloss.toFixed(1)} GU` : 'RÉF (T0)';
-              retStr = compGloss.retentionRatePercent !== null && compGloss.retentionRatePercent !== undefined ? `${compGloss.retentionRatePercent.toFixed(1)} %` : '100 %';
+              retStr = compGloss.retentionRatePercent !== null && compGloss.retentionRatePercent !== undefined ? `${compGloss.retentionRatePercent.toFixed(1)} %` : '';
             } else if (fam === 'PERSOZ') {
               const compPersoz = acq.computed as PersozComputedData;
               valStr = compPersoz.meanDampingTime !== null && compPersoz.meanDampingTime !== undefined ? `${compPersoz.meanDampingTime.toFixed(1)} s` : '—';
@@ -524,7 +621,7 @@ export function exportReportToCsv(trial: Trial, report: ScientificReport, ruleSe
               retStr = compAdh.delayCompliance || '—';
             } else if (fam === 'OBSERVATIONS') {
               const compObs = acq.computed as VisualObservationsComputedData;
-              valStr = compObs.summary || 'Aspect conforme';
+              valStr = displayValue(compObs.summary);
             }
 
             const qStatus = comp.qualityAssessment?.status || acq.status;
