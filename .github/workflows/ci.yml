@@ -1,0 +1,36 @@
+# QUV-Lab — CI (source de vérité GitHub)
+# Vérifie : typage strict (tsc) + suites de tests scientifiques (tsx) + build Vite.
+# `npm test` exécute run_tests.ts : le total est calculé par le runner lui-même
+# (somme des suites, dont Gate 57, Gate 58 et Verrou PERSOZ/Témoin) — aucun nombre
+# n'est figé ici pour éviter toute divergence future entre le workflow et la réalité.
+# `npm ci` : le lockfile est versionné (reproductible, échoue s'il est désynchronisé).
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'fix/**', 'refactor/**', 'audit/**']
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run lint
+
+      - name: Scientific test suites
+        run: npm test
+
+      - name: Production build
+        run: npm run build

@@ -1,0 +1,6 @@
+{
+  "name": "QUV-Lab",
+  "description": "Application de saisie et suivi des essais de vieillissement accéléré UV selon la NF EN 927-6",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

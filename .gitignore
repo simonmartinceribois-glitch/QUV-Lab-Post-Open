@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Production builds & artifacts
+dist/
+build/
+coverage/
+test-results.txt
+
+# Local Environment & Secrets
+.env
+.env.local
+.env.*.local
+.env*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime / Package manager secondary locks (npm with package-lock.json is canonical)
+bun.lock
+bun.lockb
+
+# IDE & Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Caches
+.eslintcache
+.vite/
+.cache/
+
