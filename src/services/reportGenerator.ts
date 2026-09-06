@@ -242,8 +242,8 @@ export function auditTrialBeforeReport(trial: Trial, ruleSet: ScientificRuleSet)
 export function buildScientificReport(
   trial: Trial,
   ruleSet: ScientificRuleSet,
-  options: {
-    operatorId: string;
+  options?: {
+    operatorId?: string;
     versionNumber?: string;
   }
 ): ScientificReport {
@@ -251,7 +251,7 @@ export function buildScientificReport(
   const now = new Date().toISOString();
   const reportId = generateUUID();
   const existingReportsCount = trial.reports?.length || 0;
-  const reportVersion = options.versionNumber || `v${existingReportsCount + 1}.0`;
+  const reportVersion = options?.versionNumber || `v${existingReportsCount + 1}.0`;
 
   const stageT0 = trial.stages.find((s) => s.stageType === 'INITIAL_PRE_EXPOSURE' || s.cycleIndex === 0);
   const stage2016 = trial.stages.find((s) => s.stageType === 'FINAL_POST_EXPOSURE' || s.cycleIndex === 12);
@@ -315,10 +315,10 @@ export function buildScientificReport(
     reportId,
     trialId: trial.id,
     generatedAt: now,
-    generatedBy: options.operatorId || 'OPERATOR',
+    generatedBy: options?.operatorId?.trim() ? options.operatorId : null,
     reportVersion,
     schemaVersion: REPORT_SCHEMA_VERSION,
-    calculationVersion: ruleSet.version || '1.2.0',
+    calculationVersion: ruleSet?.version?.trim() ? ruleSet.version : null,
     scientificRuleSetId: ruleSet.id
   };
 
@@ -413,7 +413,7 @@ export function buildScientificReport(
   const scientificSynthesisText = `Synthèse générale :\nL'essai ${trial.metadata.reference} regroupe ${trial.batches.length} lot(s) expérimental(aux).\n${t0SynthesisStatement}\n${dataPresenceStatement}\n${behaviorStatement}\nL'ensemble des résultats est conservé avec distinction stricte entre données brutes et résultats calculés.`;
 
   const sections = {
-    identification: `Essai référence : ${trial.metadata.reference}\nTitre de l'étude : ${displayValue(trial.metadata.title)}\nClient / Projet : ${displayValue(trial.metadata.projectOrClient)}\nOpérateur de génération : ${displayValue(options.operatorId)}\nDate d'émission : ${new Date(now).toLocaleString('fr-FR')}\nStatut de l'essai : ${trial.status} (Configuration : ${trial.configurationStatus})`,
+    identification: `Essai référence : ${trial.metadata.reference}\nTitre de l'étude : ${displayValue(trial.metadata.title)}\nClient / Projet : ${displayValue(trial.metadata.projectOrClient)}\nOpérateur de génération : ${displayValue(options?.operatorId)}\nDate d'émission : ${new Date(now).toLocaleString('fr-FR')}\nStatut de l'essai : ${trial.status} (Configuration : ${trial.configurationStatus})`,
     studyPurpose: `Caractérisation de la durabilité et du comportement au vieillissement artificiel accéléré de revêtements pour bois selon le référentiel d'exposition alternée UV / condensation NF EN 927-6:2018 (cycles de 168 heures, durée totale programmée de 2016 heures).\nLe module QUV concerne exclusivement le vieillissement artificiel.\nDescription du système : ${displayValue(trial.metadata.coatingSystemDescription)}\nDescription du support : ${displayValue(trial.metadata.substrateDescription)}`,
     normativeReferences: `RÉFÉRENTIEL NORMATIF DU MODULE QUV (Vieillissement artificiel exclusif) :\n` +
       `• RÉFÉRENTIEL PRINCIPAL (NORMATIF QUV) : NF EN 927-6:2018 (Peintures et vernis - Exposition des revêtements pour bois au vieillissement artificiel par des lampes UV fluorescentes et de l'eau).\n` +
@@ -454,7 +454,7 @@ export function buildScientificReport(
         )
         .join('\n'),
     measurementPlan: `Familles de mesure actives : ${trial.config.activeFamilies.join(', ')}\n• Couleur : ${trial.config.familyConfigs.COLOR?.enabled ? 'Active (4 points normatifs par éprouvette)' : 'Désactivée'}\n• Brillance : ${trial.config.familyConfigs.GLOSS?.enabled ? 'Active (2 points sens du fil + 2 points perpendiculaire)' : 'Désactivée'}\n• Persoz : ${trial.config.familyConfigs.PERSOZ?.enabled ? 'Active (3 mesures d\'amortissement - Labo)' : 'Désactivée'}\n• Adhérence au quadrillage : ${trial.config.familyConfigs.ADHESION?.enabled ? 'Active (NF EN ISO 2409:2020 - 6×6 incisions)' : 'Désactivée'}\n• Observations visuelles : ${trial.config.familyConfigs.OBSERVATIONS?.enabled ? 'Active (Évaluation ISO 4628)' : 'Désactivée'}`,
-    colorResults: `Les coordonnées trichromatiques CIE L*a*b* et les variations différentielles ΔL*, Δa*, Δb*, ΔE*ab sont issues exclusivement du moteur scientifique QUV-Lab (version ${ruleSet.version}).\nÉtape initiale T0 : Référence absolue pour chaque éprouvette.\nProgression observée : ${
+    colorResults: `Les coordonnées trichromatiques CIE L*a*b* et les variations différentielles ΔL*, Δa*, Δb*, ΔE*ab sont issues exclusivement du moteur scientifique QUV-Lab (version ${displayValue(ruleSet.version)}).\nÉtape initiale T0 : Référence absolue pour chaque éprouvette.\nProgression observée : ${
       typeof maxDeltaE === 'number'
         ? `Variation maximale ΔE* enregistrée : ${maxDeltaE.toFixed(2)} sur les éprouvettes évaluées.`
         : `Variation maximale ΔE* enregistrée : Non renseigné (aucune donnée COLOR COMPUTED admissible).`
@@ -485,7 +485,7 @@ export function buildScientificReport(
           .join('\n') +
         `\nNOTE IMPORTANTE : Une adaptation justifiée (ADAPTED_JUSTIFIED) ne constitue pas une conformité standard automatique à la NF EN 927-6.`
       : `Aucune adaptation de protocole. L'ensemble des acquisitions a suivi les paramètres standards par défaut du référentiel NF EN 927-6.`,
-    calculationTraceability: `Traçabilité intégrale du moteur de calcul :\n• Moteur scientifique : QUV-Lab Scientific Engine ${ruleSet.version}\n• RuleSet ID : ${ruleSet.id} (Référence : ${ruleSet.standardReference})\n• Méthode d'écart-type : Échantillon n-1 (${ruleSet.statisticalRules.stdDevMethod})\n• Formule colorimétrique : ${ruleSet.colorimetry.differenceFormula} (${ruleSet.colorimetry.illuminant}/${ruleSet.colorimetry.observer})\n• Géométrie de brillance par défaut : ${ruleSet.statisticalRules.glossGeometryDefault}°\n• Date d'exécution du calcul : ${now}`,
+    calculationTraceability: `Traçabilité intégrale du moteur de calcul :\n• Moteur scientifique : QUV-Lab Scientific Engine ${displayValue(ruleSet.version)}\n• RuleSet ID : ${ruleSet.id} (Référence : ${ruleSet.standardReference})\n• Méthode d'écart-type : Échantillon n-1 (${ruleSet.statisticalRules.stdDevMethod})\n• Formule colorimétrique : ${ruleSet.colorimetry.differenceFormula} (${ruleSet.colorimetry.illuminant}/${ruleSet.colorimetry.observer})\n• Géométrie de brillance par défaut : ${ruleSet.statisticalRules.glossGeometryDefault}°\n• Date d'exécution du calcul : ${now}`,
     scientificSynthesis: scientificSynthesisText,
     factualConclusion: `Les résultats obtenus montrent l'évolution des propriétés mesurées au cours de l'exposition.\n\nLes éventuelles variations observées sont présentées par famille de mesure et comparées aux valeurs initiales T0.\n\nLes relevés présentant des alertes ou des adaptations de protocole sont identifiés dans les tableaux de résultats.\n\nLa présente synthèse ne constitue pas à elle seule une conclusion de conformité à la NF EN 927-6.`
   };
@@ -502,11 +502,11 @@ export function buildScientificReport(
 
   const annexes = {
     annexA_RawDataSummary: `ANNEXE A — DONNÉES DE MESURE BRUTES (RAW DATA)\nTotal acquisitions : ${totalAcquisitionsCount} relevé(s) enregistré(s).\n${rawIntegrityStatement}`,
-    annexB_ComputedResultsSummary: `ANNEXE B — RÉSULTATS CALCULÉS (COMPUTED DATA)\nMoyennes arithmétiques, écarts-types d'échantillon, variations différentielles (ΔE*ab, ΔGloss, rétention %, ΔDureté) calculés par le moteur scientifique v${ruleSet.version}.`,
+    annexB_ComputedResultsSummary: `ANNEXE B — RÉSULTATS CALCULÉS (COMPUTED DATA)\nMoyennes arithmétiques, écarts-types d'échantillon, variations différentielles (ΔE*ab, ΔGloss, rétention %, ΔDureté) calculés par le moteur scientifique ${ruleSet.version ? `v${ruleSet.version}` : 'Non renseigné'}.`,
     annexC_QualityAssessmentSummary: `ANNEXE C — CONTRÔLE QUALITÉ DES MESURES\nSynthèse de qualification métrologique (VALID / SUSPECT / INVALID / MISSING).\n${qualityAssessmentStatement}`,
     annexD_ProtocolAdaptationsSummary: `ANNEXE D — ADAPTATIONS DE PROTOCOLE & DÉROGATIONS\nRegistre des modifications de paramétrage, motifs techniques et signatures opérateurs.`,
     annexE_AuditTrailSummary: `ANNEXE E — JOURNAL D'AUDIT SCIENTIFIQUE (AUDIT TRAIL)\nHistorique chronologique immuable des ${trial.auditTrail.length} événements enregistrés pour cet essai.`,
-    annexF_ScientificVersionSummary: `ANNEXE F — RÉFÉRENTIEL SCIENTIFIQUE & VERSIONS\nRuleSet : ${ruleSet.id} | Standard : ${ruleSet.standardReference} | Schéma : ${REPORT_SCHEMA_VERSION} | Moteur : ${ruleSet.version}`
+    annexF_ScientificVersionSummary: `ANNEXE F — RÉFÉRENTIEL SCIENTIFIQUE & VERSIONS\nRuleSet : ${ruleSet.id} | Standard : ${ruleSet.standardReference} | Schéma : ${REPORT_SCHEMA_VERSION} | Moteur : ${displayValue(ruleSet.version)}`
   };
 
   const chronologicalSummary =
@@ -542,8 +542,8 @@ export function exportReportToCsv(trial: Trial, report: ScientificReport, ruleSe
   lines.push(`Rapport ID;${report.id}`);
   lines.push(`Version Rapport;${report.metadata.reportVersion}`);
   lines.push(`Date Génération;${report.metadata.generatedAt}`);
-  lines.push(`Généré Par;${report.metadata.generatedBy}`);
-  lines.push(`Moteur Scientifique;QUV-Lab v${report.metadata.calculationVersion}`);
+  lines.push(`Généré Par;${displayValue(report.metadata.generatedBy)}`);
+  lines.push(`Moteur Scientifique;${report.metadata.calculationVersion ? `QUV-Lab v${report.metadata.calculationVersion}` : 'Non renseigné'}`);
   lines.push(`RuleSet ID;${report.metadata.scientificRuleSetId}`);
   lines.push(`Statut Protocole;${report.protocolStatus}`);
   lines.push(`Complétude;${report.isComplete ? 'COMPLET' : 'PARTIEL / EN COURS'}`);
@@ -625,8 +625,8 @@ export function exportReportToCsv(trial: Trial, report: ScientificReport, ruleSe
             }
 
             const qStatus = comp.qualityAssessment?.status || acq.status;
-            const calcVer = comp.computation?.calculationVersion || ruleSet.version;
-            const calcAt = comp.computation?.calculatedAt || acq.trace.lastModifiedAt || acq.trace.createdAt;
+            const calcVer = comp.computation?.calculationVersion ?? ruleSet.version ?? '';
+            const calcAt = comp.computation?.calculatedAt ?? acq.trace?.lastModifiedAt ?? acq.trace?.createdAt ?? '';
             // Traçabilité explicite de la référence (N/A si aucune utilisée).
             const refTrace = comp.referenceTrace;
             const refStage = refTrace?.referenceStageId ?? 'N/A';
@@ -696,9 +696,9 @@ export function exportRawDataToCsv(trial: Trial): string {
           const acq = trial.acquisitions[key];
           if (acq && acq.raw) {
             const raw = acq.raw as any;
-            const src = acq.trace?.source || 'MANUAL_KEYPAD';
-            const op = acq.trace?.createdBy || 'OP';
-            const dt = acq.trace?.createdAt || '';
+            const src = acq.trace?.source ?? '';
+            const op = acq.trace?.createdBy ?? '';
+            const dt = acq.trace?.createdAt ?? '';
 
             if (fam === 'COLOR' && Array.isArray(raw.readings)) {
               raw.readings.forEach((r: any) => {

@@ -144,3 +144,50 @@ export function calculatePersoz(
 
   return { computed, alerts };
 }
+
+export function calculatePersozMetrics(
+  raw: PersozRawData | any,
+  reference?: any,
+  ruleSet?: ScientificRuleSet
+): PersozComputedData & { alerts: MeasurementAlert[] } {
+  const rs = ruleSet || ({} as any);
+  let refRaw = reference;
+  if (reference && reference.meanDampingTime !== undefined && !reference.readings) {
+    refRaw = {
+      readings: [{ pointIndex: 1, dampingTimeSeconds: reference.meanDampingTime }]
+    };
+  }
+  const options = refRaw ? { referenceRaw: refRaw } : undefined;
+  const countConfig = {
+    configuredCount: raw?.readings?.length || 3,
+    standardRecommendedCount: 3,
+    familyId: 'PERSOZ',
+    mode: 'STANDARD_DEFAULT',
+    deviationFromStandard: false,
+    configuredBy: 'SYSTEM',
+    configuredAt: new Date().toISOString(),
+    ruleSource: 'SYSTEM_STANDARD'
+  } as unknown as MeasurementCountConfiguration;
+  const { computed, alerts } = calculatePersoz(raw, countConfig, rs, options);
+  return { ...computed, alerts };
+}
+
+export function assessPersozQuality(
+  raw: PersozRawData | any,
+  countConfig: MeasurementCountConfiguration | undefined,
+  ruleSet?: ScientificRuleSet
+): {
+  completenessPercent: number;
+  expectedCount: number;
+  actualCount: number;
+  missingCount: number;
+  status: 'CONFORMANT' | 'NON_CONFORMANT' | 'WARNING';
+} {
+  const actualCount = raw?.readings && Array.isArray(raw.readings) ? raw.readings.length : 0;
+  const expectedCount = (countConfig as any)?.configuredCount || (countConfig as any)?.standardRecommendedCount || (countConfig as any)?.standardCount || 3;
+  const completenessPercent = expectedCount > 0 ? Math.min(100, Math.round((actualCount / expectedCount) * 100)) : 100;
+  const missingCount = Math.max(0, expectedCount - actualCount);
+  const status = completenessPercent === 100 ? 'CONFORMANT' : completenessPercent >= 50 ? 'WARNING' : 'NON_CONFORMANT';
+  return { completenessPercent, expectedCount, actualCount, missingCount, status };
+}
+

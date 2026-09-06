@@ -11,7 +11,6 @@ import { Tab03Protocol } from './trial-tabs/Tab03Protocol';
 import { Tab04Calendar } from './trial-tabs/Tab04Calendar';
 import { Tab05Stages } from './trial-tabs/Tab05Stages';
 import { Tab06MeasurementsBench } from './trial-tabs/Tab06MeasurementsBench';
-import { Tab07QualityControl } from './trial-tabs/Tab07QualityControl';
 import { Tab08ResultsViews } from './trial-tabs/Tab08ResultsViews';
 import { Tab09AuditTrail } from './trial-tabs/Tab09AuditTrail';
 import { TabPhotographs } from './trial-tabs/TabPhotographs';
@@ -24,7 +23,6 @@ import {
   Clock,
   PlayCircle,
   Camera,
-  ShieldCheck,
   BarChart3,
   History,
   Lock,
@@ -59,7 +57,6 @@ export function TrialDetailView({
     { id: '05', label: '05 Étapes', icon: Clock },
     { id: '06', label: '06 Paillasse / Saisie', icon: PlayCircle },
     { id: 'PHOTO', label: 'Photothèque', icon: Camera },
-    { id: '07', label: '07 Contrôle Qualité', icon: ShieldCheck },
     { id: '08', label: '08 Résultats & Fiches', icon: BarChart3 },
     { id: '09', label: "09 Journal d'Audit", icon: History }
   ];
@@ -191,9 +188,6 @@ export function TrialDetailView({
         )}
         {activeTab === 'PHOTO' && (
           <TabPhotographs trial={trial} onTrialUpdated={onTrialUpdated} />
-        )}
-        {activeTab === '07' && (
-          <Tab07QualityControl trial={trial} ruleSet={ruleSet} />
         )}
         {activeTab === '08' && (
           <Tab08ResultsViews trial={trial} ruleSet={ruleSet} onTrialUpdated={onTrialUpdated} />

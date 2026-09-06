@@ -13,6 +13,7 @@ import {
   auditTrialBeforeReport,
   buildScientificReport,
   exportReportToCsv,
+  exportRawDataToCsv,
   displayValue
 } from '../../services/reportGenerator';
 import { getDefaultScientificRuleSet } from '../ruleSet';
@@ -899,6 +900,223 @@ export function runReportFidelityTests(): {
       globalAdversarialValid,
       'Pas de ΔE=0.00, 100%, Aspect conforme, Aucun défaut, T0 validé, Intégrité 100%',
       `DeltaE OK: ${noFabricatedDeltaE}, Gloss OK: ${noFabricatedGlossRetention}, Obs OK: ${noFabricatedAspectConforme}, Defaut OK: ${noFabricatedAucunDefaut}, T0 OK: ${noFabricatedT0Valide}, Integ OK: ${noFabricatedIntegrite100}`
+    );
+  }
+
+  // =========================================================================
+  // RF-29 : Opérateur absent — generatedBy === null, affichage "Non renseigné", pas de 'OPERATOR'
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const reportEmptyOp = buildScientificReport(trial, ruleSet, { operatorId: '' });
+    const csvEmptyOp = exportReportToCsv(trial, reportEmptyOp, ruleSet);
+
+    const generatedByIsNull = reportEmptyOp.metadata.generatedBy === null;
+    const identificationHasNonRenseigne = reportEmptyOp.sections.identification.includes('Opérateur de génération : Non renseigné');
+    const identificationNoOperator = !reportEmptyOp.sections.identification.includes('OPERATOR');
+    const csvHasNonRenseigne = csvEmptyOp.includes('Généré Par;Non renseigné');
+    const csvNoOperator = !csvEmptyOp.includes('Généré Par;OPERATOR');
+
+    const passed =
+      generatedByIsNull &&
+      identificationHasNonRenseigne &&
+      identificationNoOperator &&
+      csvHasNonRenseigne &&
+      csvNoOperator;
+
+    record(
+      'RF-29',
+      'Opérateur absent : metadata.generatedBy === null, "Non renseigné" restitué, aucun "OPERATOR" fabriqué',
+      passed,
+      'generatedBy: null, texte: "Opérateur de génération : Non renseigné", CSV: "Généré Par;Non renseigné"',
+      `generatedBy: ${reportEmptyOp.metadata.generatedBy}, id: "${reportEmptyOp.sections.identification.split('\n')[3]}", CSV: ${csvEmptyOp.split('\n').find(l => l.startsWith('Généré Par;'))}`
+    );
+  }
+
+  // =========================================================================
+  // RF-30 : Version moteur absente — calculationVersion === null, "Non renseigné", pas de fallback
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const ruleSetNoVersion = { ...ruleSet, version: '' };
+    const report = buildScientificReport(trial, ruleSetNoVersion, { operatorId: 'TECH-1' });
+    const csv = exportReportToCsv(trial, report, ruleSetNoVersion);
+
+    const calcVerIsNull = report.metadata.calculationVersion === null;
+    const csvEngineNonRenseigne = csv.includes('Moteur Scientifique;Non renseigné');
+    const csvNoDefaultVersion = !csv.includes('Moteur Scientifique;QUV-Lab v1.2.0');
+
+    const passed = calcVerIsNull && csvEngineNonRenseigne && csvNoDefaultVersion;
+
+    record(
+      'RF-30',
+      'Version absente : metadata.calculationVersion === null, CSV "Moteur Scientifique;Non renseigné", aucun "1.2.0" par défaut',
+      passed,
+      'calculationVersion: null, CSV: "Moteur Scientifique;Non renseigné"',
+      `calcVer: ${report.metadata.calculationVersion}, CSV line: ${csv.split('\n').find(l => l.startsWith('Moteur Scientifique;'))}`
+    );
+  }
+
+  // =========================================================================
+  // RF-31 : Source acquisition absente — pas de 'MANUAL_KEYPAD' arbitraire dans CSV brut
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const p1 = trial.batches[0].panels[1]; // E1
+    const st0 = trial.stages[0];
+    trial.acquisitions[`${st0.id}__${p1.id}__COLOR`] = {
+      id: 'acq-no-source',
+      trialId: trial.id,
+      stageId: st0.id,
+      batchId: trial.batches[0].id,
+      panelId: p1.id,
+      familyId: 'COLOR',
+      raw: {
+        readings: [{ pointIndex: 1, L: 60.0, a: 2.0, b: 5.0 }]
+      },
+      trace: {
+        source: undefined as any,
+        createdBy: 'OP-REAL',
+        createdAt: '2026-09-01T10:00:00Z'
+      }
+    } as any;
+
+    const csvRaw = exportRawDataToCsv(trial);
+    const noManualKeypadFallback = !csvRaw.includes('MANUAL_KEYPAD');
+    const lineWithAcq = csvRaw.split('\n').find((l) => l.includes('acq-no-source') || l.includes('COLOR;1;60;2;5'));
+    const lineHasEmptySource = lineWithAcq ? lineWithAcq.includes(';;"OP-REAL"') : false;
+
+    const passed = noManualKeypadFallback && lineHasEmptySource;
+
+    record(
+      'RF-31',
+      'Source acquisition absente : champ vide dans le CSV brut, aucun fallback "MANUAL_KEYPAD" arbitraire',
+      passed,
+      'Pas de MANUAL_KEYPAD dans le CSV, champ source vide',
+      `noManualKeypad: ${noManualKeypadFallback}, line: ${lineWithAcq}`
+    );
+  }
+
+  // =========================================================================
+  // RF-32 : Opérateur acquisition absent — pas de 'OP' ni 'OPERATOR' dans CSV brut
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const p1 = trial.batches[0].panels[1]; // E1
+    const st0 = trial.stages[0];
+    trial.acquisitions[`${st0.id}__${p1.id}__COLOR`] = {
+      id: 'acq-no-op',
+      trialId: trial.id,
+      stageId: st0.id,
+      batchId: trial.batches[0].id,
+      panelId: p1.id,
+      familyId: 'COLOR',
+      raw: {
+        readings: [{ pointIndex: 1, L: 60.0, a: 2.0, b: 5.0 }]
+      },
+      trace: {
+        source: 'SPECTRO_CI64' as any,
+        createdBy: undefined as any,
+        createdAt: '2026-09-01T10:00:00Z'
+      }
+    } as any;
+
+    const csvRaw = exportRawDataToCsv(trial);
+    const lineWithAcq = csvRaw.split('\n').find((l) => l.includes('COLOR;1;60;2;5'));
+    const lineHasEmptyOp = lineWithAcq ? lineWithAcq.includes(';SPECTRO_CI64;"";"2026-09-01') : false;
+    const noOpFallback = !lineWithAcq?.includes('"OP"') && !lineWithAcq?.includes('"OPERATOR"');
+
+    const passed = lineHasEmptyOp && noOpFallback;
+
+    record(
+      'RF-32',
+      'Opérateur acquisition absent : champ vide dans le CSV brut, aucun fallback "OP" ou "OPERATOR"',
+      passed,
+      'Opérateur vide (""), pas de OP/OPERATOR',
+      `lineHasEmptyOp: ${lineHasEmptyOp}, noOpFallback: ${noOpFallback}, line: ${lineWithAcq}`
+    );
+  }
+
+  // =========================================================================
+  // RF-33 : Date acquisition absente — pas de date actuelle inventée
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    const p1 = trial.batches[0].panels[1]; // E1
+    const st0 = trial.stages[0];
+    trial.acquisitions[`${st0.id}__${p1.id}__COLOR`] = {
+      id: 'acq-no-dt',
+      trialId: trial.id,
+      stageId: st0.id,
+      batchId: trial.batches[0].id,
+      panelId: p1.id,
+      familyId: 'COLOR',
+      raw: {
+        readings: [{ pointIndex: 1, L: 60.0, a: 2.0, b: 5.0 }]
+      },
+      trace: {
+        source: 'SPECTRO_CI64' as any,
+        createdBy: 'TECH-1',
+        createdAt: undefined as any
+      }
+    } as any;
+
+    const csvRaw = exportRawDataToCsv(trial);
+    const lineWithAcq = csvRaw.split('\n').find((l) => l.includes('COLOR;1;60;2;5'));
+    const lineHasEmptyDate = lineWithAcq ? lineWithAcq.endsWith(';SPECTRO_CI64;"TECH-1";""') : false;
+
+    record(
+      'RF-33',
+      'Date acquisition absente : champ vide dans le CSV brut, aucune date actuelle fabriquée',
+      lineHasEmptyDate,
+      'Date acquisition strictement vide ("")',
+      `line: ${lineWithAcq}`
+    );
+  }
+
+  // =========================================================================
+  // RF-34 : Régression globale anti-fabrication documentaire
+  // =========================================================================
+  {
+    const trial = createBaseTrial();
+    trial.metadata.title = '';
+    trial.metadata.projectOrClient = '';
+    trial.acquisitions = {};
+
+    const ruleSetEmpty = { ...ruleSet, version: '' };
+    const report = buildScientificReport(trial, ruleSetEmpty, { operatorId: '' });
+    const csvReport = exportReportToCsv(trial, report, ruleSetEmpty);
+    const csvRaw = exportRawDataToCsv(trial);
+
+    const generatedByNull = report.metadata.generatedBy === null;
+    const calcVerNull = report.metadata.calculationVersion === null;
+    const noOperatorInReport = !report.sections.identification.includes('OPERATOR');
+    const noOperatorInCsv = !csvReport.includes('Généré Par;OPERATOR');
+    const noManualKeypadInRaw = !csvRaw.includes('MANUAL_KEYPAD');
+    const displayNullOk = displayValue(null) === 'Non renseigné';
+    const displayUndefinedOk = displayValue(undefined) === 'Non renseigné';
+    const displayEmptyOk = displayValue('') === 'Non renseigné';
+    const displaySpacesOk = displayValue('   ') === 'Non renseigné';
+    const displayZeroPreserved = displayValue(0) === '0';
+
+    const globalDocIntegrityValid =
+      generatedByNull &&
+      calcVerNull &&
+      noOperatorInReport &&
+      noOperatorInCsv &&
+      noManualKeypadInRaw &&
+      displayNullOk &&
+      displayUndefinedOk &&
+      displayEmptyOk &&
+      displaySpacesOk &&
+      displayZeroPreserved;
+
+    record(
+      'RF-34',
+      'Régression globale anti-fabrication documentaire : aucune valeur masquant une absence de donnée',
+      globalDocIntegrityValid,
+      'Nulls stricts, displayValue rigoureux ("Non renseigné", "0"), aucun OPERATOR/MANUAL_KEYPAD/OP',
+      `genBy: ${report.metadata.generatedBy}, calcVer: ${report.metadata.calculationVersion}, dispNull: ${displayNullOk}, dispZero: ${displayZeroPreserved}`
     );
   }
 

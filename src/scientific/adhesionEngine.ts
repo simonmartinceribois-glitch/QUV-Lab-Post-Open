@@ -365,3 +365,66 @@ export function calculateAdhesion(
 
   return { computed, alerts };
 }
+
+export function calculateAdhesionMetrics(
+  raw: AdhesionRawData | any,
+  reference?: any,
+  ruleSet?: ScientificRuleSet
+): AdhesionComputedData & {
+  panelMean?: number | null;
+  coatingThicknessMicrons?: number | null;
+  individualResults: Array<{ measurementIndex: number; adhesionClass: number; observation?: string }>;
+  alerts: MeasurementAlert[];
+} {
+  const rs = ruleSet || ({} as any);
+  let refRaw = reference;
+  if (reference && reference.adhesionClass !== undefined && !reference.measurements) {
+    refRaw = { adhesionClass: reference.adhesionClass };
+  }
+  const options = refRaw ? { referenceRaw: refRaw } : undefined;
+  const { computed, alerts } = calculateAdhesion(raw, undefined, rs, options);
+
+  let panelMean = computed.adhesionClass;
+  const individualResults: Array<{ measurementIndex: number; adhesionClass: number; observation?: string }> = [];
+
+  if (raw.measurements && Array.isArray(raw.measurements) && raw.measurements.length > 0) {
+    const valid = raw.measurements.filter((m: any) => m.adhesionClass !== null && m.adhesionClass !== undefined && !isNaN(Number(m.adhesionClass)));
+    if (valid.length > 0) {
+      const sum = valid.reduce((acc: number, m: any) => acc + Number(m.adhesionClass), 0);
+      panelMean = Number((sum / valid.length).toFixed(2));
+      valid.forEach((m: any) => individualResults.push({ measurementIndex: m.measurementIndex || 1, adhesionClass: Number(m.adhesionClass), observation: m.observation }));
+    }
+  } else if (computed.adhesionClass !== null) {
+    individualResults.push({ measurementIndex: 1, adhesionClass: computed.adhesionClass, observation: raw.observation });
+  }
+
+  return {
+    ...computed,
+    panelMean,
+    coatingThicknessMicrons: raw.coatingThicknessMicrons !== undefined ? raw.coatingThicknessMicrons : null,
+    individualResults,
+    alerts
+  };
+}
+
+export function assessAdhesionQuality(
+  raw: AdhesionRawData | any,
+  countConfig: MeasurementCountConfiguration | undefined,
+  ruleSet?: ScientificRuleSet
+): {
+  completenessPercent: number;
+  expectedCount: number;
+  actualCount: number;
+  missingCount: number;
+  status: 'CONFORMANT' | 'NON_CONFORMANT' | 'WARNING';
+} {
+  const actualCount = raw?.measurements && Array.isArray(raw.measurements) && raw.measurements.length > 0
+    ? raw.measurements.length
+    : raw?.adhesionClass !== null && raw?.adhesionClass !== undefined ? 1 : 0;
+  const expectedCount = (countConfig as any)?.configuredCount || (countConfig as any)?.standardRecommendedCount || (countConfig as any)?.standardCount || 2;
+  const completenessPercent = expectedCount > 0 ? Math.min(100, Math.round((actualCount / expectedCount) * 100)) : 100;
+  const missingCount = Math.max(0, expectedCount - actualCount);
+  const status = completenessPercent === 100 ? 'CONFORMANT' : completenessPercent >= 50 ? 'WARNING' : 'NON_CONFORMANT';
+  return { completenessPercent, expectedCount, actualCount, missingCount, status };
+}
+

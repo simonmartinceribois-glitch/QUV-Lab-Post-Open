@@ -123,3 +123,54 @@ export function getActiveFamiliesForStage(
   return (activeFamilies as MeasurementFamilyId[]).filter((fam) => isFamilyScheduledForStage(fam, stage));
 }
 
+/**
+ * Prédicat d'appartenance à la population exposée E1/E2/E3 (exclut rigoureusement le témoin T).
+ */
+export function isExposedE1E2E3Panel(panel: {
+  label?: string;
+  roleCode?: string;
+  role?: string;
+}): boolean {
+  return !isWitnessPanel(panel);
+}
+
+/**
+ * Retourne les éprouvettes exposées actives E1, E2, E3.
+ */
+export function getActiveE1E2E3Panels<T extends { label?: string; roleCode?: string; role?: string; status?: string }>(
+  panels: T[]
+): T[] {
+  return getActiveExposedPanels(panels);
+}
+
+/**
+ * Éligibilité Persoz : E1, E2, E3 à tous les jalons exposés (T strictement interdit).
+ */
+export function isPersozEligiblePanel(panel: {
+  label?: string;
+  roleCode?: string;
+  role?: string;
+}): boolean {
+  return !isWitnessPanel(panel);
+}
+
+/**
+ * Éligibilité Adhésion ISO 2409 :
+ * T0 (0 h) = Témoin T uniquement.
+ * C1 à C11 = Aucun panneau.
+ * C12 (2016 h) = Éprouvettes exposées E1, E2, E3.
+ */
+export function isAdhesionEligiblePanel(
+  panel: { label?: string; roleCode?: string; role?: string },
+  stage: { cycleIndex?: number }
+): boolean {
+  if (!stage || stage.cycleIndex === undefined) return false;
+  if (stage.cycleIndex === 0) {
+    return isWitnessPanel(panel);
+  }
+  if (stage.cycleIndex === 12) {
+    return !isWitnessPanel(panel);
+  }
+  return false;
+}
+

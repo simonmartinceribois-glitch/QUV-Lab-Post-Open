@@ -99,6 +99,26 @@ export interface ComputationMetadata {
   calculatedAt: ISODateString;
 }
 
+/**
+ * Règle de sélection de la référence scientifique d'un calcul :
+ * - SAME_PANEL_T0 : T0 du même panneau (COLOR, GLOSS, PERSOZ hors T0).
+ * - T0_WITNESS_REFERENCE : T0 du panneau témoin T (ADHÉSION C12, Gate 5.6).
+ * - NONE : aucune référence utilisée (mesure initiale, OBSERVATIONS, référence absente).
+ */
+export type ReferenceRule = 'SAME_PANEL_T0' | 'T0_WITNESS_REFERENCE' | 'NONE';
+
+/**
+ * Traçabilité explicite de la référence scientifique : identifie l'étape,
+ * le panneau et l'acquisition source effectivement utilisés, plus la règle.
+ * Champs d'identifiants à null quand aucune référence n'est utilisée (NONE).
+ */
+export interface ReferenceTrace {
+  referenceStageId: UUID | null;
+  referencePanelId: UUID | null;
+  referenceAcquisitionId: UUID | null;
+  referenceRule: ReferenceRule;
+}
+
 // ============================================================================
 // 3. RÉFÉRENTIEL SCIENTIFIQUE DÉCOUPLÉ & CONFIGURATION DU PROTOCOLE
 // ============================================================================
@@ -258,6 +278,7 @@ export interface ColorComputedData {
   criterionCategory?: string;
   qualityAssessment: QualityAssessment;
   protocolStatus: ProtocolComplianceStatus;
+  referenceTrace?: ReferenceTrace;
   computation: ComputationMetadata;
 }
 
@@ -305,6 +326,7 @@ export interface GlossComputedData {
   criterionCategory?: string;
   qualityAssessment: QualityAssessment;
   protocolStatus: ProtocolComplianceStatus;
+  referenceTrace?: ReferenceTrace;
   computation: ComputationMetadata;
 }
 
@@ -337,14 +359,39 @@ export interface PersozComputedData {
   criterionCategory?: string;
   qualityAssessment: QualityAssessment;
   protocolStatus: ProtocolComplianceStatus;
+  referenceTrace?: ReferenceTrace;
   computation: ComputationMetadata;
 }
 
 // --- ADHÉRENCE — QUADRILLAGE (NF EN ISO 2409:2020) ---
 export type AdhesionClassRating = 0 | 1 | 2 | 3 | 4 | 5;
 
+/**
+ * Mesure individuelle d'adhérence (Gate 57) : le RAW conserve uniquement les observations
+ * individuelles réellement saisies — jamais de moyenne (voir D-07/GO : une seule source de vérité).
+ */
+export interface AdhesionMeasurement {
+  measurementIndex: number; // 1..N dans l'ordre de saisie
+  adhesionClass: AdhesionClassRating | number | null; // 0 à 5, entier ISO 2409
+  observation?: string;
+}
+
+/**
+ * Résultat individuel calculé (Gate 57) : recopie tracée d'une mesure RAW,
+ * enrichie du delta vs la mesure T0 témoin de même index (null si non comparable).
+ */
+export interface AdhesionIndividualResult {
+  measurementIndex: number;
+  adhesionClass: number | null;
+  deltaAdhesionClass?: number | null;
+}
+
 export interface AdhesionRawData {
-  adhesionClass: AdhesionClassRating | number | null; // 0 à 5
+  // Forme historique (scalaire) : conservée pour compatibilité de lecture des acquisitions
+  // existantes. Les nouvelles saisies utilisent `measurements` (scalaire omis).
+  adhesionClass?: AdhesionClassRating | number | null; // 0 à 5
+  // Forme standard (Gate 57) : 2 mesures indépendantes/panneau (1 si adaptation justifiée).
+  measurements?: AdhesionMeasurement[];
   observation?: string;
   measurementDateTime: ISODateString;
   applicationDateTime?: string; // Récupéré de batch.applicationDate
@@ -362,9 +409,19 @@ export interface AdhesionRawData {
 }
 
 export interface AdhesionComputedData {
+  // En mono-mesure (ou RAW historique scalaire), la classe unique. En multi-mesures,
+  // null : la moyenne fait foi via `panelMean` (une classe ISO reste un entier).
   adhesionClass: number | null;
+  // Résultats individuels recopiés du RAW (traçabilité), dans l'ordre de saisie.
+  // `deltaAdhesionClass` = écart de la mesure vs la mesure T0 témoin de même
+  // `measurementIndex` ; null quand non comparable (jamais de mesure inventée).
+  individualResults?: AdhesionIndividualResult[];
+  // Moyenne du panneau (moyenne arithmétique des classes valides), affichée à 1 décimale.
+  panelMean?: number | null;
   classDescription: string;
   initialAdhesionClass?: number | null;
+  // Moyenne T0 du panneau témoin (Gate 5.6) : référence des deltas.
+  initialPanelMean?: number | null;
   deltaAdhesionClass?: number | null; // Variation d'adhérence vs T0
   elapsedTimeHours: number | null;
   delayCompliance: 'CONFORME' | 'NON_CONFORME' | 'NON_EVALUE';
@@ -372,6 +429,7 @@ export interface AdhesionComputedData {
   criterionCategory?: string;
   qualityAssessment: QualityAssessment;
   protocolStatus: ProtocolComplianceStatus;
+  referenceTrace?: ReferenceTrace;
   computation: ComputationMetadata;
 }
 
@@ -408,6 +466,7 @@ export interface VisualObservationsComputedData {
   summary: string;
   qualityAssessment: QualityAssessment;
   protocolStatus: ProtocolComplianceStatus;
+  referenceTrace?: ReferenceTrace;
   computation: ComputationMetadata;
 }
 
@@ -465,6 +524,24 @@ export interface BatchAggregationStats {
   meanDeltaE?: number | null;
   meanDeltaGloss?: number | null;
   meanGlossRetentionPercent?: number | null;
+  // Consolidation COLOR (inter-panneaux E1/E2/E3) : moyennes et écarts-types
+  // échantillon (n-1) des moyennes panneau L*/a*/b*, à 3 décimales comme ΔE.
+  // Complète (ne remplace pas) la consolidation ΔE*ab existante.
+  color?: {
+    meanL?: number | null;
+    stdDevL?: number | null;
+    meanA?: number | null;
+    stdDevA?: number | null;
+    meanB?: number | null;
+    stdDevB?: number | null;
+  };
+  // Agrégation ADHESION (Gate 57) : moyennes des panneaux exposés uniquement (témoin exclu
+  // par l'appelant, conformément au contrat Gate 55 D-8). Champ optionnel dédié.
+  adhesion?: {
+    panelMeans: (number | null)[];
+    overallMean: number | null;
+    standardDeviation?: number | null;
+  };
   computation: ComputationMetadata;
 }
 
@@ -482,10 +559,10 @@ export interface ScientificReportMetadata {
   reportId: string;
   trialId: string;
   generatedAt: ISODateString;
-  generatedBy: string;
+  generatedBy: string | null;
   reportVersion: string;
   schemaVersion: string;
-  calculationVersion: string;
+  calculationVersion: string | null;
   scientificRuleSetId: string;
 }
 

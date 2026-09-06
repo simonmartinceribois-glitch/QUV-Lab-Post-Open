@@ -249,3 +249,31 @@ export function calculateColor(
 
   return { computed, alerts };
 }
+
+export function calculateColorMetrics(
+  raw: ColorRawData | any,
+  reference?: any,
+  ruleSet?: ScientificRuleSet
+): ColorComputedData & { alerts: MeasurementAlert[] } {
+  const rs = ruleSet || ({} as any);
+  let refRaw = reference;
+  if (reference && reference.meanL !== undefined && !reference.readings) {
+    refRaw = {
+      readings: [{ pointIndex: 1, L: reference.meanL, a: reference.meanA, b: reference.meanB }]
+    };
+  }
+  const options = refRaw ? { referenceRaw: refRaw } : undefined;
+  const countConfig = {
+    configuredCount: raw?.readings?.length || 1,
+    standardRecommendedCount: 3,
+    familyId: 'COLOR',
+    mode: 'STANDARD_DEFAULT',
+    deviationFromStandard: false,
+    configuredBy: 'SYSTEM',
+    configuredAt: new Date().toISOString(),
+    ruleSource: 'SYSTEM_STANDARD'
+  } as unknown as MeasurementCountConfiguration;
+  const { computed, alerts } = calculateColor(raw, countConfig, rs, options);
+  return { ...computed, alerts };
+}
+

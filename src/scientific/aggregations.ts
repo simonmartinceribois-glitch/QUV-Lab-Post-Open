@@ -128,3 +128,93 @@ export function aggregateBatchGloss(
     computation
   };
 }
+
+export interface PanelComputedItem<T> {
+  panel: { id?: string; label?: string; roleCode?: string; role?: string };
+  computed: T;
+}
+
+export function aggregateBatchColorExposed(
+  batchId: UUID,
+  stageId: UUID,
+  panelComputedList: PanelComputedItem<ColorComputedData>[]
+): BatchAggregationStats & {
+  color?: {
+    meanL: number | null;
+    stdDevL: number | null;
+    meanA: number | null;
+    stdDevA: number | null;
+    meanB: number | null;
+    stdDevB: number | null;
+  };
+} {
+  const exposedItems = panelComputedList.filter(
+    (item) => !item.panel || (item.panel.label !== 'T' && item.panel.role !== 'WITNESS' && item.panel.roleCode !== 'T')
+  );
+  const deltaEValues = exposedItems
+    .map((item) => item.computed.deltaE)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const lValues = exposedItems
+    .map((item) => item.computed.meanL)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const aValues = exposedItems
+    .map((item) => item.computed.meanA)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const bValues = exposedItems
+    .map((item) => item.computed.meanB)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+
+  const meanDeltaE = calculateMean(deltaEValues);
+  const interPanelStdDevDeltaE = calculateSampleStdDev(deltaEValues);
+
+  return {
+    batchId,
+    stageId,
+    familyId: 'COLOR',
+    panelsCount: panelComputedList.length,
+    activePanelsCount: exposedItems.length,
+    interPanelMean: meanDeltaE !== null ? roundMetric(meanDeltaE, 3) : null,
+    interPanelStdDev: interPanelStdDevDeltaE !== null ? roundMetric(interPanelStdDevDeltaE, 3) : null,
+    meanDeltaE: meanDeltaE !== null ? roundMetric(meanDeltaE, 3) : null,
+    color: {
+      meanL: lValues.length > 0 ? roundMetric(calculateMean(lValues)!, 3) : null,
+      stdDevL: lValues.length > 1 ? roundMetric(calculateSampleStdDev(lValues)!, 3) : null,
+      meanA: aValues.length > 0 ? roundMetric(calculateMean(aValues)!, 3) : null,
+      stdDevA: aValues.length > 1 ? roundMetric(calculateSampleStdDev(aValues)!, 3) : null,
+      meanB: bValues.length > 0 ? roundMetric(calculateMean(bValues)!, 3) : null,
+      stdDevB: bValues.length > 1 ? roundMetric(calculateSampleStdDev(bValues)!, 3) : null
+    },
+    computation: {
+      calculationVersion: AGGREGATION_CALCULATION_VERSION,
+      calculatedAt: new Date().toISOString()
+    }
+  };
+}
+
+export function aggregateBatchPersozExposed(
+  batchId: UUID,
+  stageId: UUID,
+  panelComputedList: PanelComputedItem<any>[]
+): {
+  batchId: UUID;
+  stageId: UUID;
+  meanDampingTime: number | null;
+  interPanelStdDev: number | null;
+} {
+  const exposedItems = panelComputedList.filter(
+    (item) => !item.panel || (item.panel.label !== 'T' && item.panel.role !== 'WITNESS' && item.panel.roleCode !== 'T')
+  );
+  const dampingValues = exposedItems
+    .map((item) => item.computed.meanDampingTime)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+
+  const mean = calculateMean(dampingValues);
+  const std = calculateSampleStdDev(dampingValues);
+
+  return {
+    batchId,
+    stageId,
+    meanDampingTime: mean !== null ? roundMetric(mean, 2) : null,
+    interPanelStdDev: std !== null ? roundMetric(std, 2) : null
+  };
+}

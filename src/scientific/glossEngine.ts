@@ -277,3 +277,47 @@ export function calculateGloss(
 
   return { computed, alerts };
 }
+
+export function calculateGlossMetrics(
+  raw: GlossRawData | any,
+  reference?: any,
+  ruleSet?: ScientificRuleSet
+): GlossComputedData & { alerts: MeasurementAlert[]; geometryUsed?: string } {
+  const rs = ruleSet || ({} as any);
+  let refRaw = reference;
+  if (reference && reference.meanGloss !== undefined && !reference.series) {
+    refRaw = {
+      series: [
+        {
+          seriesIndex: 1,
+          readings: [{ pointIndex: 1, value: reference.meanGloss }]
+        }
+      ]
+    };
+  }
+  const options = refRaw ? { referenceRaw: refRaw } : undefined;
+  const seriesCount = raw?.series?.length || 1;
+  const readingsPerSeries = raw?.series?.[0]?.readings?.length || 1;
+  const totalReadings = seriesCount * readingsPerSeries;
+  const seriesConfig = {
+    familyId: 'GLOSS',
+    mode: 'STANDARD_DEFAULT',
+    configuredBy: 'SYSTEM',
+    configuredAt: new Date().toISOString(),
+    ruleSource: 'SYSTEM_STANDARD',
+    configuredConfiguration: {
+      seriesCount,
+      readingsPerSeries,
+      totalReadings
+    },
+    standardConfiguration: {
+      seriesCount: 2,
+      readingsPerSeries: 2,
+      totalReadings: 4
+    },
+    deviationFromStandard: false
+  } as unknown as MeasurementSeriesConfiguration;
+  const { computed, alerts } = calculateGloss(raw, seriesConfig, rs, options);
+  return { ...computed, alerts, geometryUsed: '60' };
+}
+
